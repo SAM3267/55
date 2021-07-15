@@ -167,14 +167,10 @@ def main():
     print("Welcome to trivia game!")
     client_sockets = []
     server_socket = setup_socket()
-    global users  
+    global users, questions, messages_to_send
     users = load_user_database()
-    global questions
     questions = load_questions()
-    global messages_to_send
     messages_to_send= []
-    global loginF
-    loginF = False
 
     while True:
         ready_to_read, ready_to_write, in_error = select.select([server_socket] + client_sockets, client_sockets, [])
