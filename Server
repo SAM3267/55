@@ -1,0 +1,206 @@
+import socket
+import chatlib
+import select
+import random
+
+users = {}
+questions = {}
+error_msg = "Error! "
+SERVER_PORT = 5678
+SERVER_IP = "127.0.0.1"
+logged_users = {}
+ 
+
+def load_questions():
+	"""
+	Loads questions bank from file	## FILE SUPPORT TO BE ADDED LATER
+	Recieves: -
+	Returns: questions dictionary
+	"""
+	questions = {
+				2313 : {"question":"How much is 2+2","answers":["3","4","2","1"],"correct":2},
+				4122 : {"question":"What is the capital of France?","answers":["Lion","Marseille","Paris","Montpellier"],"correct":3} 
+				}
+	
+	return questions
+
+def load_user_database():
+	"""
+	Loads users list from file	## FILE SUPPORT TO BE ADDED LATER
+	Recieves: -
+	Returns: user dictionary
+	"""
+	users = {
+			"test"		:	{"password":"test","score":0,"questions_asked":[]},
+			"yossi"		:	{"password":"123","score":50,"questions_asked":[]},
+			"master"	:	{"password":"master","score":200,"questions_asked":[]}
+			}
+	return users
+
+def recv_message_and_parse(sock):
+    data = sock.recv(1024).decode()
+    cmd, msg = chatlib.parse_message(data)
+    return cmd, msg
+
+def build_and_send_message(sock, cmd, data):
+    msg = chatlib.build_message(cmd, data)
+    toADD = (sock, msg)
+    messages_to_send.append(toADD)
+
+def setup_socket():
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(("0.0.0.0", 5555))
+    server_socket.listen()
+    return server_socket
+
+def print_client_sockets(socks):
+    for sock in socks:
+        print(sock.getpeername())
+
+def send_error(sock, error_msg):
+    build_and_send_message(sock, "ERROR", error_msg)
+
+def handle_login_message(sock, data):
+    user_and_password = chatlib.split_data(data, 2)
+    if (user_and_password[0] in users):
+        if user_and_password[1] == users[user_and_password[0]]["password"]:
+            logged_users[sock.getpeername()] = user_and_password[0]  
+            build_and_send_message(sock, "LOGIN_OK", "")
+        else:
+            send_error(sock, "passwords does not match!")
+    else:
+        send_error(sock, "this user dont exist")
+
+
+def handle_client_message(sock, cmd, data):
+    if sock.getpeername() not in logged_users:
+        handle_login_message(sock, data)
+        return
+    else:
+        if (cmd == 'LOGIN'):
+            handle_login_message(sock, data)
+            return
+
+        if (cmd == 'LOGOUT' or cmd == ''):
+            handle_logout_message(sock)
+            return
+        if (cmd == 'MY_SCORE'):
+            handle_getscore_message(sock, logged_users[sock.getpeername()])
+            return
+        if (cmd == 'HIGHSCORE'):
+            handle_highscore_message(sock)
+            return
+
+        if (cmd == 'GET_QUESTION'):
+            handle_question_message(sock)
+            return
+
+            return
+        if (cmd == 'SEND_ANSWER'):
+            handle_answer_message(sock, logged_users[sock.getpeername()], data)
+            return
+
+        if (cmd =='LOGGED'):
+            handle_logged_message(sock)
+            return
+
+        else:
+            send_error(sock, error_msg)
+
+def handle_logout_message(sock):
+    user = sock.getpeername()
+    if user in logged_users:
+        print("the user: {" + logged_users.pop(user) + "} logout and disconnected")
+    sock.close()
+
+def handle_getscore_message(sock, username):
+    if (username in users):
+        score_this = users[username]['score']
+        build_and_send_message(sock, 'YOUR_SCORE', score_this)
+    else:
+        send_error(sock, "this username do not exist")
+
+def handle_highscore_message(sock):
+    ok = {}
+    for what in users:
+        ok[what] = users[what]['score']
+        mahr = ""
+    ok = sorted(ok.items(), key=lambda x: x[1], reverse=True)
+    index = 0
+    for thing in ok:
+        mahr += ok[index][0] + ": " + str(ok[index][1]) + "\n"
+        index += 1
+
+    build_and_send_message(sock, "ALL_SCORE", mahr)
+
+def handle_logged_message(sock):
+
+    build_and_send_message(sock, 'LOGGED_ANSWER', logged_users.values())
+
+def create_random_question():
+    id = random.choice(list(questions))
+    
+    stringTo = str(id) + '#' + str(questions[id]['question']) + '#' + '#'.join(questions[id]['answers'])
+    return stringTo
+
+def handle_answer_message(sock, username, data):
+    dataN = chatlib.split_data(data, 2)
+    ID = dataN[0]
+    Answer = dataN[1]
+    if int(ID) in questions:
+        ourAnswer = questions[int(ID)]['correct']
+        if  int(ourAnswer) == int(Answer):
+            users[username]['score'] += 5
+            build_and_send_message(sock, 'CORRECT_ANSWER', '')
+        else:
+            build_and_send_message(sock, 'WRONG_ANSWER', questions[int(ID)]['correct'])
+
+def handle_question_message(sock):
+    stringQuestion = create_random_question()
+    build_and_send_message(sock, 'YOUR_QUESTION', stringQuestion)
+
+
+
+
+
+def main():
+    print("Welcome to trivia game!")
+    client_sockets = []
+    server_socket = setup_socket()
+    global users  
+    users = load_user_database()
+    global questions
+    questions = load_questions()
+    global messages_to_send
+    messages_to_send= []
+    global loginF
+    loginF = False
+
+    while True:
+        ready_to_read, ready_to_write, in_error = select.select([server_socket] + client_sockets, client_sockets, [])
+        for current_socket in ready_to_read:
+            if current_socket is server_socket:
+                (client_socket, client_address) = current_socket.accept()
+                print("New client joined!")
+                client_sockets.append(client_socket)
+                passAndUser = client_socket.recv(1024).decode()
+                handle_client_message(client_socket, 'LOGIN', passAndUser)
+
+            else:
+                data = current_socket.recv(1024).decode()
+                if data == "":
+                    print("Connection closed",)
+                    client_sockets.remove(current_socket)
+                    current_socket.close()
+                else:
+                    handle_client_message(current_socket, cmd, data)
+
+        for message in messages_to_send:
+            current_socket, data = message
+            if current_socket in ready_to_write:
+                current_socket.send(data.enconde())
+                messages_to_send.remove(message)
+
+
+if __name__ == "__main__":
+    main()
